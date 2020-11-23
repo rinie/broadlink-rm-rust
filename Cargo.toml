@@ -1,9 +1,10 @@
 [package]
-name = "broadlink-artik"
+name = "broadlink-rm"
 version = "0.1.0"
-authors = ["Vincent Debergue"]
+authors = ["Rinie Kervel", "Vincent Debergue"]
 
 [dependencies]
 time = "0.1"
-openssl = "0.10.5"
+openssl = "0.10"
+hex = "0.4.2"
 
