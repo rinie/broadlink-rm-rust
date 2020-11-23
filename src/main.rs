@@ -14,7 +14,7 @@ fn main() {
             let mut device = discover(ip, Some(Duration::from_secs(5)));
             device.auth();
             //device.set_power(true);
-            //device.check_power();
+            device.check_temperature().unwrap();
             let mut device = discover(ip, Some(Duration::from_secs(5)));
             device.auth();
         }
@@ -145,8 +145,9 @@ trait Device {
         payload[0x36] = '1' as u8;
 
         let response = self.send_packet(0x65, &payload);
-        println!("Auth response len = {}: {:x?}", response.len(), response);
-
+        let err: u16 = (response[0x22] as u16) | (response[0x23] as u16) << 8;
+        let command: u8 = response[0x26]; // 0xe9 auth, 0xee or 0xef payload
+	//  check_error(response[0x22:0x24])
         if response.len() > 0x38 {
             let r = &response[0x38..];
             println!(
@@ -156,6 +157,9 @@ trait Device {
             );
 
             let decrypted_payload = self.decrypt(&response[0x38..]);
+	    let param: u8 = decrypted_payload[0];
+        
+            println!("Auth response err/cmd/par = {}/{:02x}/{:02x} len = {}", err, command, param, response.len());
 
             let mut key = [0u8; 16];
             let mut id = [0u8; 4];
@@ -165,6 +169,7 @@ trait Device {
             self.device_info_mut().key = key;
             self.device_info_mut().id = id;
         } else {
+            println!("Auth response err/cmd = {}/{:02x} len = {}", err, command, response.len());
             println!("No response from device on auth request :(");
         }
     }
@@ -241,12 +246,6 @@ trait Device {
             out
         };
 
-        println!(
-            "Payload {} padded_payload {}",
-            payload.len(),
-            padded_payload.len()
-        );
-
         // payload checksum
         let payload_checksum = self.checksum(&padded_payload);
         packet[0x34] = payload_checksum as u8;
@@ -254,12 +253,6 @@ trait Device {
 
         // encrypt payload
         let mut encrypted_payload = self.encrypt(&padded_payload);
-        println!(
-            "Payload {} padded_payload {} encrypted_payload {}",
-            payload.len(),
-            padded_payload.len(),
-            encrypted_payload.len()
-        );
         // RKR encryption enlarges and that is wrong!
         encrypted_payload.resize(padded_payload.len(), 0);
         // append encrypted payload to packet
@@ -302,7 +295,7 @@ trait Device {
     }
 
     fn decrypt(&self, ciphertext: &[u8]) -> Vec<u8> {
-        println!("Decrypting {} {:?}", ciphertext.len(), ciphertext);
+        //println!("Decrypting {} {:?}", ciphertext.len(), ciphertext);
         //let cipher = openssl::symm::Cipher::aes_128_cbc();
         /*
         //Data is decrypted using the specified cipher type t in decrypt mode with the specified key and initailization vector iv. Padding is enabled.
@@ -436,6 +429,25 @@ impl RM {
             device_info: DeviceInfo::new(addr, mac),
         }
     }
+  fn check_temperature(&mut self) -> Result<bool, &'static str> {
+    let mut payload: [u8; 16] = [0; 16];
+    payload[0] = 0x01;
+    let response = self.send_packet(0x6a, &payload);
+    let err = (response[0x22] as u16) | ((response[0x23] as u16) << 8);
+    if err == 0 {
+        let command: u8 = response[0x26]; // 0xe9 auth, 0xee or 0xef payload
+      let response_clear = self.decrypt(&response[0x38..]);
+        let param: u8 = response_clear[0];
+        println!("check_temperature response err/cmd/par = {}/{:02x}/{:02x} len = {}", err, command, param, response.len());
+      let t: f32 = (response_clear[0x4] * 10 + response_clear[0x5]).into();
+      let temp = t / 10.0;
+       println!("Temp {}", temp);
+      let status = 1;
+      Ok(status > 0)
+    } else {
+      Err("got error response")
+    }
+  }
 }
 
 impl Device for RM {
