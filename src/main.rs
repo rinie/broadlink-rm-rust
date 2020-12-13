@@ -29,7 +29,7 @@ fn get_local_ip() -> IpAddr {
     addr.ip()
 }
 
-fn discover(local_ip: Ipv4Addr, timeout: Option<Duration>) -> RM {
+fn discover(local_ip: Ipv4Addr, timeout: Option<Duration>) -> BL {
     let socket = UdpSocket::bind(SocketAddr::new(IpAddr::V4(local_ip), 0)).expect("bind failed");
     socket.set_broadcast(true).expect("set_broadcast failed");
 
@@ -56,23 +56,23 @@ fn discover(local_ip: Ipv4Addr, timeout: Option<Duration>) -> RM {
     device
 }
 
-fn gendevice(src: SocketAddr, response: &[u8]) -> RM {
+fn gendevice(src: SocketAddr, response: &[u8]) -> BL {
     let device_type: u16 = (response[0x34] as u16) | (response[0x35] as u16) << 8;
     println!("device type = {:x}", device_type);
     let mut mac = [0; 6];
     mac.copy_from_slice(&response[0x3a..0x40]);
     match device_type {
-        //0x2728 => {
-        //  SP2::new(String::from("SP2"), device_type, src, mac)
-        //},
+        0x2728 => {
+          BL::SP2(SP2::new(String::from("SP2"), device_type, src, mac))
+        },
         0x2737 => {
             println!("Broadlink RM Mini device type = {:x}", device_type);
-            RM::new(String::from("Broadlink RM Mini"), device_type, src, mac)
+            BL::RM2(RM::new(String::from("Broadlink RM Mini"), device_type, src, mac))
         }
         // has RF
         0x272a => {
             println!("Broadlink RM2 Pro Plus device type = {:x}", device_type);
-            RM::new(String::from("Broadlink RM2 Pro Plus"), device_type, src, mac)
+            BL::RM2(RM::new(String::from("Broadlink RM2 Pro Plus"), device_type, src, mac))
         }
         _ => panic!("Unsupported device type {}", device_type),
     }
@@ -376,18 +376,18 @@ impl BroadlinkDeviceInfo {
     }
 }
 
-/*
+
 #[derive(Debug)]
 struct SP2 {
   device_info: BroadlinkDeviceInfo
 }
 
 impl SP2 {
-  fn new(addr: SocketAddr, mac: [u8; 6]) -> SP2 {
-    SP2 {
-      device_info: BroadlinkDeviceInfo::new(addr, mac)
+    fn new(device_type: String, device_type_nr: u16, addr: SocketAddr, mac: [u8; 6]) -> SP2 {
+        SP2 {
+            device_info: BroadlinkDeviceInfo::new(device_type, device_type_nr, addr, mac),
+        }
     }
-  }
 
   fn check_power(&mut self) -> Result<bool, &'static str> {
     let mut payload: [u8; 16] = [0; 16];
@@ -420,11 +420,17 @@ impl BroadlinkDevice for SP2 {
     &mut self.device_info
   }
 }
-*/
+
 
 #[derive(Debug)]
 struct RM {
-    device_info: BroadlinkDeviceInfo,
+  device_info: BroadlinkDeviceInfo
+}
+
+#[derive(Debug)]
+enum BL {
+    RM2(RM),
+    SP2(SP2),
 }
 
 impl RM {
@@ -455,11 +461,51 @@ impl RM {
 }
 
 impl BroadlinkDevice for RM {
+  fn device_info(&self) -> &BroadlinkDeviceInfo {
+    &self.device_info
+  }
+
+  fn device_info_mut(&mut self) -> &mut BroadlinkDeviceInfo {
+    &mut self.device_info
+  }
+}
+
+
+impl BroadlinkDevice for BL {
     fn device_info(&self) -> &BroadlinkDeviceInfo {
-        &self.device_info
+        match self{
+        	BL::RM2(inner) => inner.device_info(),
+        	BL::SP2(inner) => inner.device_info(),
+        }
     }
 
     fn device_info_mut(&mut self) -> &mut BroadlinkDeviceInfo {
-        &mut self.device_info
+        match self{
+        	BL::RM2(inner) => inner.device_info_mut(),
+        	BL::SP2(inner) => inner.device_info_mut(),
+        }
+    }
+}
+
+impl BL {
+  fn check_temperature(&mut self) -> Result<bool, &'static str> {
+        match self{
+        	BL::RM2(inner) => inner.check_temperature(),
+        	BL::SP2(inner) => Err("No Temp for device"),
+        }
+    }
+
+  fn check_power(&mut self) -> Result<bool, &'static str> {
+        match self{
+        	BL::RM2(inner) => Err("No power for device"),
+        	BL::SP2(inner) => inner.check_power(),
+        }
+    }
+
+  fn set_power(&mut self, state: bool) {
+        match self{
+        	BL::RM2(inner) => (),
+        	BL::SP2(inner) => inner.set_power(state),
+        }
     }
 }
