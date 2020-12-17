@@ -13,10 +13,27 @@ fn main() {
         IpAddr::V4(ip) => {
             let mut device = discover(ip, Some(Duration::from_secs(5)));
             device.auth();
-            //device.set_power(true);
-            device.check_temperature().unwrap();
+            match device {
+                BL::SP2(_)=>device.set_power(true),
+                _ => ()
+            };
+            match device {
+                BL::SP2(_)=>device.check_power().unwrap(),
+                BL::RM2(_)=>device.check_temperature().unwrap(),
+                //_ => false
+            };
+            
             let mut device = discover(ip, Some(Duration::from_secs(5)));
             device.auth();
+            match device {
+                BL::SP2(_)=>device.set_power(true),
+                _ => ()
+            };
+            match device {
+                BL::SP2(_)=>device.check_power().unwrap(),
+                BL::RM2(_)=>device.check_temperature().unwrap(),
+                //_ => false
+            };
         }
         _ => println!("no ipv4"),
     }
@@ -37,7 +54,7 @@ fn discover(local_ip: Ipv4Addr, timeout: Option<Duration>) -> BL {
     let packet = hello_packet(local_ip, addr.port());
     println!(
         "sending packet {:x?} on socket {:?}",
-        &packet[0..0x30],
+        hex::encode(&packet[0..0x30]),
         socket
     );
     socket
@@ -49,7 +66,7 @@ fn discover(local_ip: Ipv4Addr, timeout: Option<Duration>) -> BL {
         .set_read_timeout(timeout)
         .expect("set_read_timeout failed");
     let (amt, src) = socket.recv_from(&mut buf).expect("read failed");
-    println!("Data from {:?} : {:x?}", src, &buf[0..amt]);
+    println!("Data from {:?} : {:x?}", src,  hex::encode(&buf[0..amt]));
 
     let device = gendevice(src, &buf);
     println!("Got device {:x?}", device);
@@ -491,20 +508,20 @@ impl BL {
   fn check_temperature(&mut self) -> Result<bool, &'static str> {
         match self{
         	BL::RM2(inner) => inner.check_temperature(),
-        	BL::SP2(inner) => Err("No Temp for device"),
+        	BL::SP2(_inner) => Err("No Temp for device"),
         }
     }
 
   fn check_power(&mut self) -> Result<bool, &'static str> {
         match self{
-        	BL::RM2(inner) => Err("No power for device"),
+        	BL::RM2(_inner) => Err("No power for device"),
         	BL::SP2(inner) => inner.check_power(),
         }
     }
 
   fn set_power(&mut self, state: bool) {
         match self{
-        	BL::RM2(inner) => (),
+        	BL::RM2(_inner) => (),
         	BL::SP2(inner) => inner.set_power(state),
         }
     }
