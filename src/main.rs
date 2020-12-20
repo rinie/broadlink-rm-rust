@@ -3,6 +3,9 @@ use std::time::Duration;
 extern crate hex;
 extern crate openssl;
 extern crate time;
+extern crate macaddr;
+use macaddr::{MacAddr6};
+
 use openssl::symm::{Cipher, Crypter, Mode};
 
 fn main() {
@@ -76,8 +79,10 @@ fn discover(local_ip: Ipv4Addr, timeout: Option<Duration>) -> BL {
 fn gendevice(src: SocketAddr, response: &[u8]) -> BL {
     let device_type: u16 = (response[0x34] as u16) | (response[0x35] as u16) << 8;
     println!("device type = {:x}", device_type);
-    let mut mac = [0; 6];
-    mac.copy_from_slice(&response[0x3a..0x40]);
+    let mac = MacAddr6::new(response[0x3a], response[0x3b], response[0x3c],response[0x3d], response[0x3e], response[0x3f]);
+    //macc.from(&response[0x3a..0x40]);
+    //let mut mac = [0; 6];
+    //mac.copy_from_slice(&response[0x3a..0x40]);
     match device_type {
         0x2728 => {
           BL::SP2(SP2::new(String::from("SP2"), device_type, src, mac))
@@ -229,12 +234,20 @@ trait BroadlinkDevice {
 
         packet[0x28] = self.device_info().count as u8;
         packet[0x29] = (self.device_info().count >> 8) as u8;
-        packet[0x2a] = self.device_info().mac[0]; // reversed in JS bus seems OK
-        packet[0x2b] = self.device_info().mac[1];
-        packet[0x2c] = self.device_info().mac[2];
-        packet[0x2d] = self.device_info().mac[3];
-        packet[0x2e] = self.device_info().mac[4];
-        packet[0x2f] = self.device_info().mac[5];
+	let mut mac = [0; 6];
+    	mac.copy_from_slice(self.device_info().mac.as_bytes());
+        packet[0x2a] = mac[0]; // reversed in JS bus seems OK
+        packet[0x2b] = mac[1];
+        packet[0x2c] = mac[2];
+        packet[0x2d] = mac[3];
+        packet[0x2e] = mac[4];
+        packet[0x2f] = mac[5];
+        //packet[0x2a] = self.device_info().mac[0]; // reversed in JS bus seems OK
+        //packet[0x2b] = self.device_info().mac[1];
+        //packet[0x2c] = self.device_info().mac[2];
+        //packet[0x2d] = self.device_info().mac[3];
+        //packet[0x2e] = self.device_info().mac[4];
+        //packet[0x2f] = self.device_info().mac[5];
         packet[0x30] = self.device_info().id[0];
         packet[0x31] = self.device_info().id[1];
         packet[0x32] = self.device_info().id[2];
@@ -357,7 +370,8 @@ struct BroadlinkDeviceInfo {
     device_type: String,
     device_type_nr: u16,
     addr: SocketAddr,
-    mac: [u8; 6],
+    //mac: [u8; 6],
+    mac: MacAddr6,
     count: u16,
     id: [u8; 4],
     iv: [u8; 16],
@@ -366,7 +380,7 @@ struct BroadlinkDeviceInfo {
 }
 
 impl BroadlinkDeviceInfo {
-    fn new(device_type: String, device_type_nr: u16, addr: SocketAddr, mac: [u8; 6]) -> BroadlinkDeviceInfo {
+    fn new(device_type: String, device_type_nr: u16, addr: SocketAddr, mac: MacAddr6) -> BroadlinkDeviceInfo {
         let socket = UdpSocket::bind("0.0.0.0:0").expect("Could not bind socket");
         socket.set_broadcast(true).expect("Could not set broadcast");
         BroadlinkDeviceInfo {
@@ -400,7 +414,7 @@ struct SP2 {
 }
 
 impl SP2 {
-    fn new(device_type: String, device_type_nr: u16, addr: SocketAddr, mac: [u8; 6]) -> SP2 {
+    fn new(device_type: String, device_type_nr: u16, addr: SocketAddr, mac: MacAddr6) -> SP2 {
         SP2 {
             device_info: BroadlinkDeviceInfo::new(device_type, device_type_nr, addr, mac),
         }
@@ -451,7 +465,7 @@ enum BL {
 }
 
 impl RM {
-    fn new(device_type: String, device_type_nr: u16, addr: SocketAddr, mac: [u8; 6]) -> RM {
+    fn new(device_type: String, device_type_nr: u16, addr: SocketAddr, mac: MacAddr6) -> RM {
         RM {
             device_info: BroadlinkDeviceInfo::new(device_type, device_type_nr, addr, mac),
         }

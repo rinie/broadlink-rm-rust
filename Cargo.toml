@@ -7,4 +7,4 @@ authors = ["Rinie Kervel", "Vincent Debergue"]
 time = "0.1"
 openssl = "0.10"
 hex = "0.4.2"
-
+macaddr = "1.0"
