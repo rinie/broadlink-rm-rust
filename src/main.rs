@@ -1,10 +1,10 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::time::Duration;
 extern crate hex;
+extern crate macaddr;
 extern crate openssl;
 extern crate time;
-extern crate macaddr;
-use macaddr::{MacAddr6};
+use macaddr::MacAddr6;
 
 use openssl::symm::{Cipher, Crypter, Mode};
 
@@ -17,24 +17,24 @@ fn main() {
             let mut device = discover(ip, Some(Duration::from_secs(5)));
             device.auth();
             match device {
-                BL::SP2(_)=>device.set_power(true),
-                _ => ()
+                BL::SP2(_) => device.set_power(true),
+                _ => (),
             };
             match device {
-                BL::SP2(_)=>device.check_power().unwrap(),
-                BL::RM2(_)=>device.check_temperature().unwrap(),
+                BL::SP2(_) => device.check_power().unwrap(),
+                BL::RM2(_) => device.check_temperature().unwrap(),
                 //_ => false
             };
-            
+
             let mut device = discover(ip, Some(Duration::from_secs(5)));
             device.auth();
             match device {
-                BL::SP2(_)=>device.set_power(true),
-                _ => ()
+                BL::SP2(_) => device.set_power(true),
+                _ => (),
             };
             match device {
-                BL::SP2(_)=>device.check_power().unwrap(),
-                BL::RM2(_)=>device.check_temperature().unwrap(),
+                BL::SP2(_) => device.check_power().unwrap(),
+                BL::RM2(_) => device.check_temperature().unwrap(),
                 //_ => false
             };
         }
@@ -69,7 +69,7 @@ fn discover(local_ip: Ipv4Addr, timeout: Option<Duration>) -> BL {
         .set_read_timeout(timeout)
         .expect("set_read_timeout failed");
     let (amt, src) = socket.recv_from(&mut buf).expect("read failed");
-    println!("Data from {:?} : {:x?}", src,  hex::encode(&buf[0..amt]));
+    println!("Data from {:?} : {:x?}", src, hex::encode(&buf[0..amt]));
 
     let device = gendevice(src, &buf);
     println!("Got device {:x?}", device);
@@ -79,22 +79,37 @@ fn discover(local_ip: Ipv4Addr, timeout: Option<Duration>) -> BL {
 fn gendevice(src: SocketAddr, response: &[u8]) -> BL {
     let device_type: u16 = (response[0x34] as u16) | (response[0x35] as u16) << 8;
     println!("device type = {:x}", device_type);
-    let mac = MacAddr6::new(response[0x3a], response[0x3b], response[0x3c],response[0x3d], response[0x3e], response[0x3f]);
+    let mac = MacAddr6::new(
+        response[0x3a],
+        response[0x3b],
+        response[0x3c],
+        response[0x3d],
+        response[0x3e],
+        response[0x3f],
+    );
     //macc.from(&response[0x3a..0x40]);
     //let mut mac = [0; 6];
     //mac.copy_from_slice(&response[0x3a..0x40]);
     match device_type {
-        0x2728 => {
-          BL::SP2(SP2::new(String::from("SP2"), device_type, src, mac))
-        },
+        0x2728 => BL::SP2(SP2::new(String::from("SP2"), device_type, src, mac)),
         0x2737 => {
             println!("Broadlink RM Mini device type = {:x}", device_type);
-            BL::RM2(RM::new(String::from("Broadlink RM Mini"), device_type, src, mac))
+            BL::RM2(RM::new(
+                String::from("Broadlink RM Mini"),
+                device_type,
+                src,
+                mac,
+            ))
         }
         // has RF
         0x272a => {
             println!("Broadlink RM2 Pro Plus device type = {:x}", device_type);
-            BL::RM2(RM::new(String::from("Broadlink RM2 Pro Plus"), device_type, src, mac))
+            BL::RM2(RM::new(
+                String::from("Broadlink RM2 Pro Plus"),
+                device_type,
+                src,
+                mac,
+            ))
         }
         _ => panic!("Unsupported device type {}", device_type),
     }
@@ -156,8 +171,10 @@ trait BroadlinkDevice {
         payload[0x10] = 0x31;
         payload[0x11] = 0x31;
         payload[0x12] = 0x31;
+
         payload[0x1e] = 0x01;
         payload[0x2d] = 0x01;
+
         payload[0x30] = 'T' as u8;
         payload[0x31] = 'e' as u8;
         payload[0x32] = 's' as u8;
@@ -169,7 +186,7 @@ trait BroadlinkDevice {
         let response = self.send_packet(0x65, &payload);
         let err: u16 = (response[0x22] as u16) | (response[0x23] as u16) << 8;
         let command: u8 = response[0x26]; // 0xe9 auth, 0xee or 0xef payload
-	//  check_error(response[0x22:0x24])
+                                          //  check_error(response[0x22:0x24])
         if response.len() > 0x38 {
             let r = &response[0x38..];
             println!(
@@ -179,19 +196,30 @@ trait BroadlinkDevice {
             );
 
             let decrypted_payload = self.decrypt(&response[0x38..]);
-	    let param: u8 = decrypted_payload[0];
-        
-            println!("Auth response err/cmd/par = {}/{:02x}/{:02x} len = {}", err, command, param, response.len());
+            let param: u8 = decrypted_payload[0];
 
-            let mut key = [0u8; 16];
+            println!(
+                "Auth response err/cmd/par = {}/{:02x}/{:02x} len = {}",
+                err,
+                command,
+                param,
+                response.len()
+            );
+
             let mut id = [0u8; 4];
-            key.clone_from_slice(&decrypted_payload[0x04..0x14]);
             id.clone_from_slice(&decrypted_payload[0x00..0x04]);
+            let mut key = [0u8; 16];
+            key.clone_from_slice(&decrypted_payload[0x04..0x14]);
 
-            self.device_info_mut().key = key;
             self.device_info_mut().id = id;
+            self.device_info_mut().key = key;
         } else {
-            println!("Auth response err/cmd = {}/{:02x} len = {}", err, command, response.len());
+            println!(
+                "Auth response err/cmd = {}/{:02x} len = {}",
+                err,
+                command,
+                response.len()
+            );
             println!("No response from device on auth request :(");
         }
     }
@@ -234,8 +262,8 @@ trait BroadlinkDevice {
 
         packet[0x28] = self.device_info().count as u8;
         packet[0x29] = (self.device_info().count >> 8) as u8;
-	let mut mac = [0; 6];
-    	mac.copy_from_slice(self.device_info().mac.as_bytes());
+        let mut mac = [0; 6];
+        mac.copy_from_slice(self.device_info().mac.as_bytes());
         packet[0x2a] = mac[0]; // reversed in JS bus seems OK
         packet[0x2b] = mac[1];
         packet[0x2c] = mac[2];
@@ -374,13 +402,18 @@ struct BroadlinkDeviceInfo {
     mac: MacAddr6,
     count: u16,
     id: [u8; 4],
-    iv: [u8; 16],
     key: [u8; 16],
+    iv: [u8; 16],
     socket: UdpSocket,
 }
 
 impl BroadlinkDeviceInfo {
-    fn new(device_type: String, device_type_nr: u16, addr: SocketAddr, mac: MacAddr6) -> BroadlinkDeviceInfo {
+    fn new(
+        device_type: String,
+        device_type_nr: u16,
+        addr: SocketAddr,
+        mac: MacAddr6,
+    ) -> BroadlinkDeviceInfo {
         let socket = UdpSocket::bind("0.0.0.0:0").expect("Could not bind socket");
         socket.set_broadcast(true).expect("Could not set broadcast");
         BroadlinkDeviceInfo {
@@ -390,14 +423,8 @@ impl BroadlinkDeviceInfo {
             mac,
             count: 0,
             id: [0; 4],
-            iv: [
-                0x56, 0x2e, 0x17, 0x99, 0x6d, 0x09, 0x3d, 0x28, 0xdd, 0xb3, 0xba, 0x69, 0x5a, 0x2e,
-                0x6f, 0x58,
-            ],
-            key: [
-                0x09, 0x76, 0x28, 0x34, 0x3f, 0xe9, 0x9e, 0x23, 0x76, 0x5c, 0x15, 0x13, 0xac, 0xcf,
-                0x8b, 0x02,
-            ],
+            key: *b"\x09\x76\x28\x34\x3f\xe9\x9e\x23\x76\x5c\x15\x13\xac\xcf\x8b\x02",
+            iv: *b"\x56\x2e\x17\x99\x6d\x09\x3d\x28\xdd\xb3\xba\x69\x5a\x2e\x6f\x58",
             socket,
         }
     }
@@ -407,10 +434,9 @@ impl BroadlinkDeviceInfo {
     }
 }
 
-
 #[derive(Debug)]
 struct SP2 {
-  device_info: BroadlinkDeviceInfo
+    device_info: BroadlinkDeviceInfo,
 }
 
 impl SP2 {
@@ -420,42 +446,41 @@ impl SP2 {
         }
     }
 
-  fn check_power(&mut self) -> Result<bool, &'static str> {
-    let mut payload: [u8; 16] = [0; 16];
-    payload[0] = 1;
-    let response = self.send_packet(0x6a, &payload);
-    let err = (response[0x22] as u16) | ((response[0x23] as u16) << 8);
-    if err == 0 {
-      let response_clear = self.decrypt(&response[0x38..]);
-      let status = response_clear[0x4];
-      Ok(status > 0)
-    } else {
-      Err("got error response")
+    fn check_power(&mut self) -> Result<bool, &'static str> {
+        let mut payload: [u8; 16] = [0; 16];
+        payload[0] = 1;
+        let response = self.send_packet(0x6a, &payload);
+        let err = (response[0x22] as u16) | ((response[0x23] as u16) << 8);
+        if err == 0 {
+            let response_clear = self.decrypt(&response[0x38..]);
+            let status = response_clear[0x4];
+            Ok(status > 0)
+        } else {
+            Err("got error response")
+        }
     }
-  }
 
-  fn set_power(&mut self, state: bool) {
-    let mut payload = [0u8; 16];
-    payload[0] = 2;
-    payload[4] = state as u8;
-    self.send_packet(0x6a, &payload);
-  }
+    fn set_power(&mut self, state: bool) {
+        let mut payload = [0u8; 16];
+        payload[0] = 2;
+        payload[4] = state as u8;
+        self.send_packet(0x6a, &payload);
+    }
 }
 
 impl BroadlinkDevice for SP2 {
-  fn device_info(&self) -> &BroadlinkDeviceInfo {
-    &self.device_info
-  }
+    fn device_info(&self) -> &BroadlinkDeviceInfo {
+        &self.device_info
+    }
 
-  fn device_info_mut(&mut self) -> &mut BroadlinkDeviceInfo {
-    &mut self.device_info
-  }
+    fn device_info_mut(&mut self) -> &mut BroadlinkDeviceInfo {
+        &mut self.device_info
+    }
 }
-
 
 #[derive(Debug)]
 struct RM {
-  device_info: BroadlinkDeviceInfo
+    device_info: BroadlinkDeviceInfo,
 }
 
 #[derive(Debug)]
@@ -470,73 +495,78 @@ impl RM {
             device_info: BroadlinkDeviceInfo::new(device_type, device_type_nr, addr, mac),
         }
     }
-  fn check_temperature(&mut self) -> Result<bool, &'static str> {
-    let mut payload: [u8; 16] = [0; 16];
-    payload[0] = 0x01;
-    let response = self.send_packet(0x6a, &payload);
-    let err = (response[0x22] as u16) | ((response[0x23] as u16) << 8);
-    if err == 0 {
-        let command: u8 = response[0x26]; // 0xe9 auth, 0xee or 0xef payload
-      let response_clear = self.decrypt(&response[0x38..]);
-        let param: u8 = response_clear[0];
-        println!("check_temperature response err/cmd/par = {}/{:02x}/{:02x} len = {}", err, command, param, response.len());
-      let t: f32 = (response_clear[0x4] * 10 + response_clear[0x5]).into();
-      let temp = t / 10.0;
-       println!("Temp {}", temp);
-      let status = 1;
-      Ok(status > 0)
-    } else {
-      Err("got error response")
+    fn check_temperature(&mut self) -> Result<bool, &'static str> {
+        let mut payload: [u8; 16] = [0; 16];
+        payload[0] = 0x01;
+        let response = self.send_packet(0x6a, &payload);
+        let err = (response[0x22] as u16) | ((response[0x23] as u16) << 8);
+        if err == 0 {
+            let command: u8 = response[0x26]; // 0xe9 auth, 0xee or 0xef payload
+            let response_clear = self.decrypt(&response[0x38..]);
+            let param: u8 = response_clear[0];
+            println!(
+                "check_temperature response err/cmd/par = {}/{:02x}/{:02x} len = {}",
+                err,
+                command,
+                param,
+                response.len()
+            );
+            let t: f32 = (response_clear[0x4] * 10 + response_clear[0x5]).into();
+            let temp = t / 10.0;
+            println!("Temp {}", temp);
+            let status = 1;
+            Ok(status > 0)
+        } else {
+            Err("got error response")
+        }
     }
-  }
 }
 
 impl BroadlinkDevice for RM {
-  fn device_info(&self) -> &BroadlinkDeviceInfo {
-    &self.device_info
-  }
+    fn device_info(&self) -> &BroadlinkDeviceInfo {
+        &self.device_info
+    }
 
-  fn device_info_mut(&mut self) -> &mut BroadlinkDeviceInfo {
-    &mut self.device_info
-  }
+    fn device_info_mut(&mut self) -> &mut BroadlinkDeviceInfo {
+        &mut self.device_info
+    }
 }
-
 
 impl BroadlinkDevice for BL {
     fn device_info(&self) -> &BroadlinkDeviceInfo {
-        match self{
-        	BL::RM2(inner) => inner.device_info(),
-        	BL::SP2(inner) => inner.device_info(),
+        match self {
+            BL::RM2(inner) => inner.device_info(),
+            BL::SP2(inner) => inner.device_info(),
         }
     }
 
     fn device_info_mut(&mut self) -> &mut BroadlinkDeviceInfo {
-        match self{
-        	BL::RM2(inner) => inner.device_info_mut(),
-        	BL::SP2(inner) => inner.device_info_mut(),
+        match self {
+            BL::RM2(inner) => inner.device_info_mut(),
+            BL::SP2(inner) => inner.device_info_mut(),
         }
     }
 }
 
 impl BL {
-  fn check_temperature(&mut self) -> Result<bool, &'static str> {
-        match self{
-        	BL::RM2(inner) => inner.check_temperature(),
-        	BL::SP2(_inner) => Err("No Temp for device"),
+    fn check_temperature(&mut self) -> Result<bool, &'static str> {
+        match self {
+            BL::RM2(inner) => inner.check_temperature(),
+            BL::SP2(_inner) => Err("No Temp for device"),
         }
     }
 
-  fn check_power(&mut self) -> Result<bool, &'static str> {
-        match self{
-        	BL::RM2(_inner) => Err("No power for device"),
-        	BL::SP2(inner) => inner.check_power(),
+    fn check_power(&mut self) -> Result<bool, &'static str> {
+        match self {
+            BL::RM2(_inner) => Err("No power for device"),
+            BL::SP2(inner) => inner.check_power(),
         }
     }
 
-  fn set_power(&mut self, state: bool) {
-        match self{
-        	BL::RM2(_inner) => (),
-        	BL::SP2(inner) => inner.set_power(state),
+    fn set_power(&mut self, state: bool) {
+        match self {
+            BL::RM2(_inner) => (),
+            BL::SP2(inner) => inner.set_power(state),
         }
     }
 }
