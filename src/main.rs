@@ -1,10 +1,12 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::time::Duration;
 extern crate hex;
+extern crate hex_literal;
 extern crate macaddr;
 extern crate openssl;
 extern crate time;
 use macaddr::MacAddr6;
+use hex_literal::hex;
 
 use openssl::symm::{Cipher, Crypter, Mode};
 
@@ -423,8 +425,8 @@ impl BroadlinkDeviceInfo {
             mac,
             count: 0,
             id: [0; 4],
-            key: *b"\x09\x76\x28\x34\x3f\xe9\x9e\x23\x76\x5c\x15\x13\xac\xcf\x8b\x02",
-            iv: *b"\x56\x2e\x17\x99\x6d\x09\x3d\x28\xdd\xb3\xba\x69\x5a\x2e\x6f\x58",
+            key: hex!("097628343fe99e23765c1513accf8b02"),
+            iv: hex!("562e17996d093d28ddb3ba695a2e6f58"),
             socket,
         }
     }
