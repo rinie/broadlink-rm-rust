@@ -1,17 +1,22 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
-use std::time::Duration;
+use std::thread::sleep;
+use std::time::{Duration, Instant};
+extern crate env_logger;
 extern crate hex;
 extern crate hex_literal;
+extern crate log;
 extern crate macaddr;
 extern crate openssl;
 extern crate time;
-use macaddr::MacAddr6;
 use hex_literal::hex;
+use macaddr::MacAddr6;
+//use log::{debug, error, log_enabled, info, Level};
 
 use openssl::symm::{Cipher, Crypter, Mode};
 
 fn main() {
-    println!("Hello, world!");
+    env_logger::init();
+    println!("Broadlink-rm-rust RUST_LOG loglevel {}", log::max_level());
     let local_ip = get_local_ip();
     println!("Got local ip: {}", local_ip);
     match local_ip {
@@ -39,6 +44,14 @@ fn main() {
                 BL::RM2(_) => device.check_temperature().unwrap(),
                 //_ => false
             };
+            match device {
+                BL::RM2(_) => device.get_firmware().unwrap(),
+                _ => false,
+            };
+            match device {
+                BL::RM2(_) => device.enter_learning().unwrap(),
+                _ => false,
+            };
         }
         _ => println!("no ipv4"),
     }
@@ -57,7 +70,7 @@ fn discover(local_ip: Ipv4Addr, timeout: Option<Duration>) -> BL {
 
     let addr = socket.local_addr().expect("Could not get local addr");
     let packet = hello_packet(local_ip, addr.port());
-    println!(
+    log::debug!(
         "sending packet {:x?} on socket {:?}",
         hex::encode(&packet[0..0x30]),
         socket
@@ -71,7 +84,7 @@ fn discover(local_ip: Ipv4Addr, timeout: Option<Duration>) -> BL {
         .set_read_timeout(timeout)
         .expect("set_read_timeout failed");
     let (amt, src) = socket.recv_from(&mut buf).expect("read failed");
-    println!("Data from {:?} : {:x?}", src, hex::encode(&buf[0..amt]));
+    log::info!("Data from {:?} : {:x?}", src, hex::encode(&buf[0..amt]));
 
     let device = gendevice(src, &buf);
     println!("Got device {:x?}", device);
@@ -205,7 +218,7 @@ trait BroadlinkDevice {
                 err,
                 command,
                 param,
-                response.len()
+                decrypted_payload.len()
             );
 
             let mut id = [0u8; 4];
@@ -233,7 +246,7 @@ trait BroadlinkDevice {
             .send_to(&packet, self.device_info().addr)
             .expect("couldn't send data");
 
-        println!("Send {}: {:x?}", packet.len(), hex::encode(packet));
+        log::debug!("Send {}: {:x?}", packet.len(), hex::encode(packet));
         let timeout = Some(Duration::from_secs(5));
         socket
             .set_read_timeout(timeout)
@@ -242,8 +255,30 @@ trait BroadlinkDevice {
         let mut buf = [0; 2048];
         let (amt, _) = socket.recv_from(&mut buf).expect("read failed");
         vec.extend_from_slice(&buf[0..amt]);
-        println!("Received {}: {:x?}", amt, hex::encode(&buf[0..amt]));
+        log::debug!("Received {}: {:x?}", amt, hex::encode(&buf[0..amt]));
         vec
+    }
+
+    fn send_packet0x6a_response(&mut self, packet0: u8) -> (u16, u8, u8, Vec<u8>) {
+        let mut payload: [u8; 16] = [0; 16];
+        payload[0] = packet0;
+        let response = self.send_packet(0x6a, &payload);
+        let err = (response[0x22] as u16) | ((response[0x23] as u16) << 8);
+        let command: u8 = response[0x26]; // 0xe9 auth, 0xee or 0xef payload
+        if err == 0 {
+            let payload = self.decrypt(&response[0x38..]);
+            let param: u8 = payload[0];
+            log::debug!(
+                "send_packet0x6a_response response err/cmd/par = {}/{:02x}/{:02x} len = {}",
+                err,
+                command,
+                param,
+                payload.len()
+            );
+            return (err, command, param, payload);
+        } else {
+            return (err, command, 0, response);
+        }
     }
 
     fn make_packet(&mut self, command: u8, payload: &[u8]) -> Vec<u8> {
@@ -287,7 +322,7 @@ trait BroadlinkDevice {
         let padded_payload: Vec<u8> = if (payload.len() % 16) != 0 {
             let numpad = (payload.len() / 16 + 1) * 16;
             let zeroes_to_add = numpad - payload.len();
-            println!(
+            log::debug!(
                 "Padding Payload {} numpad {} zeroes_to_add {}",
                 payload.len(),
                 numpad,
@@ -449,13 +484,9 @@ impl SP2 {
     }
 
     fn check_power(&mut self) -> Result<bool, &'static str> {
-        let mut payload: [u8; 16] = [0; 16];
-        payload[0] = 1;
-        let response = self.send_packet(0x6a, &payload);
-        let err = (response[0x22] as u16) | ((response[0x23] as u16) << 8);
+        let (err, _command, _param, payload) = self.send_packet0x6a_response(1);
         if err == 0 {
-            let response_clear = self.decrypt(&response[0x38..]);
-            let status = response_clear[0x4];
+            let status = payload[0x4];
             Ok(status > 0)
         } else {
             Err("got error response")
@@ -498,24 +529,155 @@ impl RM {
         }
     }
     fn check_temperature(&mut self) -> Result<bool, &'static str> {
-        let mut payload: [u8; 16] = [0; 16];
-        payload[0] = 0x01;
-        let response = self.send_packet(0x6a, &payload);
-        let err = (response[0x22] as u16) | ((response[0x23] as u16) << 8);
+        let (err, command, param, payload) = self.send_packet0x6a_response(0x01);
         if err == 0 {
-            let command: u8 = response[0x26]; // 0xe9 auth, 0xee or 0xef payload
-            let response_clear = self.decrypt(&response[0x38..]);
-            let param: u8 = response_clear[0];
-            println!(
+            log::debug!(
                 "check_temperature response err/cmd/par = {}/{:02x}/{:02x} len = {}",
                 err,
                 command,
                 param,
-                response.len()
+                payload.len()
             );
-            let t: f32 = (response_clear[0x4] * 10 + response_clear[0x5]).into();
+            let t: f32 = (payload[0x4] * 10 + payload[0x5]).into();
             let temp = t / 10.0;
             println!("Temp {}", temp);
+            let status = 1;
+            Ok(status > 0)
+        } else {
+            Err("got error response")
+        }
+    }
+
+    fn get_firmware(&mut self) -> Result<bool, &'static str> {
+        let (err, command, param, payload) = self.send_packet0x6a_response(0x68);
+        if err == 0 {
+            log::debug!(
+                "get_firmware response err/cmd/par = {}/{:02x}/{:02x} len = {}",
+                err,
+                command,
+                param,
+                payload.len()
+            );
+            let firmware: u16 = (payload[0x4] as u16) | ((payload[0x5] as u16) << 8);
+            println!("Firmware {}", firmware);
+            let status = 1;
+            Ok(status > 0)
+        } else {
+            Err("got error response")
+        }
+    }
+
+    fn enter_learning(&mut self) -> Result<bool, &'static str> {
+        // IR is 03, RF = 0x1B
+        let one_sec = Duration::from_secs(1);
+        let thirty_secs = Duration::from_secs(30);
+        /*
+            def send_data(self, data: bytes) -> None:
+                """Send a code to the device."""
+                self._send(0x2, data)
+
+            def enter_learning(self) -> None:
+                """Enter infrared learning mode."""
+                self._send(0x3)
+
+            def check_data(self) -> bytes:
+                """Return the last captured code."""
+                return self._send(0x4)
+
+            def sweep_frequency(self) -> None:
+                """Sweep frequency."""
+                self._send(0x19)
+
+            def check_frequency(self) -> bool:
+                """Return True if the frequency was identified successfully."""
+                resp = self._send(0x1A)
+                return resp[0] == 1
+
+            def find_rf_packet(self) -> None:
+                """Enter radiofrequency learning mode."""
+                self._send(0x1B)
+
+            def cancel_sweep_frequency(self) -> None:
+                """Cancel sweep frequency."""
+                self._send(0x1E)
+        */
+        let (err, _command, _param, _payload) = self.send_packet0x6a_response(0x19);
+        let mut sweep_ok = false;
+        if err == 0 {
+            let start = Instant::now();
+            while start.elapsed() < thirty_secs {
+                sleep(one_sec);
+                let (err, command, param, payload) = self.send_packet0x6a_response(0x1A);
+                if err == 0 {
+                    println!(
+                        "checkData sweep err/cmd/par = {}/{:02x}/{:02x} len = {} {:x?}",
+                        err,
+                        command,
+                        param,
+                        payload.len(),
+                        hex::encode(&payload[0..payload.len()])
+                    );
+                    sweep_ok = true;
+                    break;
+                } else {
+                    println!(
+                        "checkData sweep error err/cmd/par = {}/{:02x}/{:02x} len = {}",
+                        err,
+                        command,
+                        param,
+                        payload.len()
+                    )
+                }
+            }
+        }
+        if !sweep_ok {
+            self.send_packet0x6a_response(0x1E);
+        }
+        let (err, command, param, payload) = self.send_packet0x6a_response(0x1B);
+        if err == 0 {
+            println!(
+                "enter_learning response err/cmd/par = {}/{:02x}/{:02x} len = {}",
+                err,
+                command,
+                param,
+                payload.len()
+            );
+            let start = Instant::now();
+            while start.elapsed() < thirty_secs {
+                sleep(one_sec);
+                let (err, command, param, payload) = self.send_packet0x6a_response(0x04);
+                if err == 0 {
+                    println!(
+                        "checkData04 response err/cmd/par = {}/{:02x}/{:02x} len = {} {:x?}",
+                        err,
+                        command,
+                        param,
+                        payload.len(),
+                        hex::encode(&payload[0..payload.len()])
+                    );
+                    let signal_type = 
+                    	match payload[4] {
+                    	0x26 => "ir",
+                    	0xb2 => "ook433",
+                    	0xd7 => "ook315",
+                    	_ => "?"
+                    };
+                    let repeat = payload[5];
+                    let pulse_space_count = (payload[0x6] as u16) | (payload[0x7] as u16) << 8;
+                    println!("Signaltype {} {:02x} Repeat {} PSC {} len {}", signal_type, payload[4], repeat, pulse_space_count, payload.len()-8);
+                    break;
+                } else {
+                    log::debug!(
+                        "checkData04 error err/cmd/par = {}/{:02x}/{:02x} len = {}",
+                        err,
+                        command,
+                        param,
+                        payload.len()
+                    )
+                }
+            }
+            //let firmware: u16 = (payload[0x4] as u16) | ((payload[0x5] as u16) << 8);
+            //println!("Firmware {}", firmware);
             let status = 1;
             Ok(status > 0)
         } else {
@@ -555,6 +717,20 @@ impl BL {
         match self {
             BL::RM2(inner) => inner.check_temperature(),
             BL::SP2(_inner) => Err("No Temp for device"),
+        }
+    }
+
+    fn get_firmware(&mut self) -> Result<bool, &'static str> {
+        match self {
+            BL::RM2(inner) => inner.get_firmware(),
+            BL::SP2(_inner) => Err("No Firmware for device"),
+        }
+    }
+
+    fn enter_learning(&mut self) -> Result<bool, &'static str> {
+        match self {
+            BL::RM2(inner) => inner.enter_learning(),
+            BL::SP2(_inner) => Err("No Learning for device"),
         }
     }
 
