@@ -167,6 +167,18 @@ fn hello_packet(local_ip: Ipv4Addr, port: u16) -> [u8; 0x30] {
     packet[0x21] = (checksum >> 8) as u8;
     packet
 }
+#[repr(u8)]
+enum RmCmd {
+	CheckSensors = 0x01,
+	SendData = 0x02,
+	LearnIr = 0x03,
+	CheckData = 0x04,
+	SweepFrequency = 0x19,
+	CheckFrequency = 0x1A,
+	LearnRf = 0x1B,
+	CancelSweepFrequency = 0x1E,
+	GetFirmware = 0x68
+}
 
 trait BroadlinkDevice {
     fn auth(&mut self) {
@@ -204,7 +216,7 @@ trait BroadlinkDevice {
                                           //  check_error(response[0x22:0x24])
         if response.len() > 0x38 {
             let r = &response[0x38..];
-            println!(
+            log::debug!!(
                 "Auth response payload len = {}: {:x?}",
                 r.len(),
                 hex::encode(r)
@@ -213,7 +225,7 @@ trait BroadlinkDevice {
             let decrypted_payload = self.decrypt(&response[0x38..]);
             let param: u8 = decrypted_payload[0];
 
-            println!(
+            log::debug!!(
                 "Auth response err/cmd/par = {}/{:02x}/{:02x} len = {}",
                 err,
                 command,
@@ -229,7 +241,7 @@ trait BroadlinkDevice {
             self.device_info_mut().id = id;
             self.device_info_mut().key = key;
         } else {
-            println!(
+            log::debug!!(
                 "Auth response err/cmd = {}/{:02x} len = {}",
                 err,
                 command,
@@ -259,9 +271,9 @@ trait BroadlinkDevice {
         vec
     }
 
-    fn send_packet0x6a_response(&mut self, packet0: u8) -> (u16, u8, u8, Vec<u8>) {
+    fn send_packet0x6a(&mut self, packet0: RmCmd) -> (u16, u8, u8, Vec<u8>) {
         let mut payload: [u8; 16] = [0; 16];
-        payload[0] = packet0;
+        payload[0] = packet0 as u8;
         let response = self.send_packet(0x6a, &payload);
         let err = (response[0x22] as u16) | ((response[0x23] as u16) << 8);
         let command: u8 = response[0x26]; // 0xe9 auth, 0xee or 0xef payload
@@ -269,7 +281,7 @@ trait BroadlinkDevice {
             let payload = self.decrypt(&response[0x38..]);
             let param: u8 = payload[0];
             log::debug!(
-                "send_packet0x6a_response response err/cmd/par = {}/{:02x}/{:02x} len = {}",
+                "send_packet0x6a response err/cmd/par = {}/{:02x}/{:02x} len = {}",
                 err,
                 command,
                 param,
@@ -484,7 +496,7 @@ impl SP2 {
     }
 
     fn check_power(&mut self) -> Result<bool, &'static str> {
-        let (err, _command, _param, payload) = self.send_packet0x6a_response(1);
+        let (err, _command, _param, payload) = self.send_packet0x6a(RmCmd::CheckSensors);
         if err == 0 {
             let status = payload[0x4];
             Ok(status > 0)
@@ -529,7 +541,7 @@ impl RM {
         }
     }
     fn check_temperature(&mut self) -> Result<bool, &'static str> {
-        let (err, command, param, payload) = self.send_packet0x6a_response(0x01);
+        let (err, command, param, payload) = self.send_packet0x6a(RmCmd::CheckSensors);
         if err == 0 {
             log::debug!(
                 "check_temperature response err/cmd/par = {}/{:02x}/{:02x} len = {}",
@@ -549,7 +561,7 @@ impl RM {
     }
 
     fn get_firmware(&mut self) -> Result<bool, &'static str> {
-        let (err, command, param, payload) = self.send_packet0x6a_response(0x68);
+        let (err, command, param, payload) = self.send_packet0x6a(RmCmd::GetFirmware);
         if err == 0 {
             log::debug!(
                 "get_firmware response err/cmd/par = {}/{:02x}/{:02x} len = {}",
@@ -571,45 +583,15 @@ impl RM {
         // IR is 03, RF = 0x1B
         let one_sec = Duration::from_secs(1);
         let thirty_secs = Duration::from_secs(30);
-        /*
-            def send_data(self, data: bytes) -> None:
-                """Send a code to the device."""
-                self._send(0x2, data)
-
-            def enter_learning(self) -> None:
-                """Enter infrared learning mode."""
-                self._send(0x3)
-
-            def check_data(self) -> bytes:
-                """Return the last captured code."""
-                return self._send(0x4)
-
-            def sweep_frequency(self) -> None:
-                """Sweep frequency."""
-                self._send(0x19)
-
-            def check_frequency(self) -> bool:
-                """Return True if the frequency was identified successfully."""
-                resp = self._send(0x1A)
-                return resp[0] == 1
-
-            def find_rf_packet(self) -> None:
-                """Enter radiofrequency learning mode."""
-                self._send(0x1B)
-
-            def cancel_sweep_frequency(self) -> None:
-                """Cancel sweep frequency."""
-                self._send(0x1E)
-        */
-        let (err, _command, _param, _payload) = self.send_packet0x6a_response(0x19);
+        let (err, _command, _param, _payload) = self.send_packet0x6a(RmCmd::SweepFrequency);
         let mut sweep_ok = false;
         if err == 0 {
             let start = Instant::now();
             while start.elapsed() < thirty_secs {
                 sleep(one_sec);
-                let (err, command, param, payload) = self.send_packet0x6a_response(0x1A);
+                let (err, command, param, payload) = self.send_packet0x6a(RmCmd::CheckFrequency);
                 if err == 0 {
-                    println!(
+                    log::debug!(
                         "checkData sweep err/cmd/par = {}/{:02x}/{:02x} len = {} {:x?}",
                         err,
                         command,
@@ -617,6 +599,7 @@ impl RM {
                         payload.len(),
                         hex::encode(&payload[0..payload.len()])
                     );
+                    println!("Sweep OK {}", payload[0]);
                     sweep_ok = true;
                     break;
                 } else {
@@ -631,11 +614,11 @@ impl RM {
             }
         }
         if !sweep_ok {
-            self.send_packet0x6a_response(0x1E);
+            self.send_packet0x6a(RmCmd::CancelSweepFrequency);
         }
-        let (err, command, param, payload) = self.send_packet0x6a_response(0x1B);
+        let (err, command, param, payload) = self.send_packet0x6a(RmCmd::LearnRf);
         if err == 0 {
-            println!(
+            log::debug!(
                 "enter_learning response err/cmd/par = {}/{:02x}/{:02x} len = {}",
                 err,
                 command,
@@ -645,7 +628,7 @@ impl RM {
             let start = Instant::now();
             while start.elapsed() < thirty_secs {
                 sleep(one_sec);
-                let (err, command, param, payload) = self.send_packet0x6a_response(0x04);
+                let (err, command, param, payload) = self.send_packet0x6a(RmCmd::CheckData);
                 if err == 0 {
                     println!(
                         "checkData04 response err/cmd/par = {}/{:02x}/{:02x} len = {} {:x?}",
