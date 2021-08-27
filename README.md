@@ -69,7 +69,8 @@ Micros [
   psiv ps header 70 datax  0 898 900  +0ms
   psiv ps datax  0 900 900  +1ms
 901 239,716,1218,5786,6151,6699,7422,45680 '001107:xb4b2ab2b3-0061x4cad2caacacc-61x4cad2caacacc-60xa65696556566-0302x532b4b2ab2b3-0061x4cad2caacacc-61x4cad2caacacc-61x4cad2caacacc-61x4cad2caacacc-61x4cad2caacacc-61x4cad2caacacc-61x4cad2caacacc-61x4cad2caacacc-61x4cad2c0ab2b3-004021x4cad2caacacc-61x4cad2caacac6-06xa656964ab2b3-0061x4cad2caacacc-70' pilight:rust_broadlink
-  psi PulseSpaceIndex {
+
+>  psi PulseSpaceIndex {
   psi   signalType: 'pilight:rust_broadlink',
   psi   frameCount: 2,
   psi   count: 901,
@@ -110,7 +111,8 @@ Micros [
 } +2ms
   psiv ps datax a65696556566 trailer 02 48 0 50 101001100101011010010110010101010110010101100110 +0ms
 50 245,713,7430 '001102:xa65696556566-02' pilight:rust_broadlink2
-  psi PulseSpaceIndex {
+
+>  psi PulseSpaceIndex {
   psi   signalType: 'pilight:rust_broadlink2',
   psi   frameCount: 1,
   psi   count: 50,
@@ -144,7 +146,8 @@ Micros [
   start: 0,
   end: 201
 } +5ms
-  psiv ps datax a65696556566 trailer 02 48 0 50 101001100101011010010110010101010110010101100110 +2ms
+
+>  psiv ps datax a65696556566 trailer 02 48 0 50 101001100101011010010110010101010110010101100110 +2ms
   psiv ps datax 532b4b2ab2b3-00 50 50 100 01010011001010110100101100101010101100101011001100 +1ms
   psiv ps header 21 datax 4cad2caacacc 48 100 150 010011001010110100101100101010101100101011001100 +0ms
   psiv ps header 21 datax 4cad2caacacc 48 150 200 010011001010110100101100101010101100101011001100 +1ms
