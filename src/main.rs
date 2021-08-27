@@ -4,14 +4,14 @@ use std::time::{Duration, Instant};
 extern crate env_logger;
 extern crate hex;
 extern crate hex_literal;
+extern crate itertools;
 extern crate log;
 extern crate macaddr;
 extern crate openssl;
 extern crate time;
-extern crate itertools;
 use hex_literal::hex;
-use macaddr::MacAddr6;
 use itertools::Itertools;
+use macaddr::MacAddr6;
 //use log::{debug, error, log_enabled, info, Level};
 
 use openssl::symm::{Cipher, Crypter, Mode};
@@ -171,15 +171,15 @@ fn hello_packet(local_ip: Ipv4Addr, port: u16) -> [u8; 0x30] {
 }
 #[repr(u8)]
 enum RmCmd {
-	CheckSensors = 0x01,
-	SendData = 0x02,
-	LearnIr = 0x03,
-	CheckData = 0x04,
-	SweepFrequency = 0x19,
-	CheckFrequency = 0x1A,
-	LearnRf = 0x1B,
-	CancelSweepFrequency = 0x1E,
-	GetFirmware = 0x68
+    CheckSensors = 0x01,
+    SendData = 0x02,
+    LearnIr = 0x03,
+    CheckData = 0x04,
+    SweepFrequency = 0x19,
+    CheckFrequency = 0x1A,
+    LearnRf = 0x1B,
+    CancelSweepFrequency = 0x1E,
+    GetFirmware = 0x68,
 }
 
 trait BroadlinkDevice {
@@ -640,47 +640,54 @@ impl RM {
                         payload.len(),
                         hex::encode(&payload[0..payload.len()])
                     );
-                    let signal_type = 
-                    	match payload[4] {
-                    	0x26 => "ir",
-                    	0xb2 => "ook433",
-                    	0xd7 => "ook315",
-                    	_ => "?"
+                    let signal_type = match payload[4] {
+                        0x26 => "ir",
+                        0xb2 => "ook433",
+                        0xd7 => "ook315",
+                        _ => "?",
                     };
                     let repeat = payload[5];
                     let pulse_space_count = (payload[0x6] as u16) | (payload[0x7] as u16) << 8;
-                    let psc = std::cmp::min(pulse_space_count, (payload.len()-8) as u16);
+                    let psc = std::cmp::min(pulse_space_count, (payload.len() - 8) as u16);
                     let mut micros: Vec<u16> = Vec::with_capacity(pulse_space_count.into());
                     let ticks = &payload[8..];
                     let mut micro_count = 0;
-              
-                    for mut i in 0 .. ticks.len()-1 {
-			      let mut ps = ticks[i] as u16;
-			      if ps == 0 && (i + 2 < ticks.len()){ // 0 then big endian 2 bytes
-				ps = ((ticks[i + 1] as u16) << 8) | (ticks[i + 2]  as u16);
-				i += 2;
-			      }
-			      let micro = ps as u32 * 8192 / 269;
-			      micro_count += 1;
-			      micros.push(micro as u16); /* 30.51757 */ // 2^-15 seconds
-			      if micro_count >= pulse_space_count {
-			      	break;
-			      }
+
+                    for mut i in 0..ticks.len() - 1 {
+                        let mut ps = ticks[i] as u16;
+                        if ps == 0 && (i + 2 < ticks.len()) {
+                            // 0 then big endian 2 bytes
+                            ps = ((ticks[i + 1] as u16) << 8) | (ticks[i + 2] as u16);
+                            i += 2;
+                        }
+                        let micro = ps as u32 * 8192 / 269;
+                        micro_count += 1;
+                        micros.push(micro as u16); /* 30.51757 */
+ // 2^-15 seconds
+                        if micro_count >= pulse_space_count {
+                            break;
+                        }
                     }
-                    let counts = micros
-                    	.clone()
-                    	.into_iter()
-                    	.counts();
+                    let counts = micros.clone().into_iter().counts();
                     let mut sorted: Vec<_> = counts.iter().collect();
                     sorted.sort_by_key(|a| a.0);
-			println!("Time {:?}", sorted);                	
+                    println!("Time {:?}", sorted);
 
                     sorted.sort_by_key(|a| a.1);
                     sorted.reverse();
-			println!("Count {:?}", sorted);                	
+                    println!("Count {:?}", sorted);
 
-                    println!("Signaltype {} {:02x} Repeat {} PSC {} len {} Frequency {:?} Micros {:?}", signal_type, payload[4], repeat, pulse_space_count, payload.len()-8, counts, micros);
-                    
+                    println!(
+                        "Signaltype {} {:02x} Repeat {} PSC {} len {} Frequency {:?} Micros {:?}",
+                        signal_type,
+                        payload[4],
+                        repeat,
+                        pulse_space_count,
+                        payload.len() - 8,
+                        counts,
+                        micros
+                    );
+
                     break;
                 } else {
                     log::debug!(
