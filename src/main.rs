@@ -8,8 +8,10 @@ extern crate log;
 extern crate macaddr;
 extern crate openssl;
 extern crate time;
+extern crate itertools;
 use hex_literal::hex;
 use macaddr::MacAddr6;
+use itertools::Itertools;
 //use log::{debug, error, log_enabled, info, Level};
 
 use openssl::symm::{Cipher, Crypter, Mode};
@@ -216,7 +218,7 @@ trait BroadlinkDevice {
                                           //  check_error(response[0x22:0x24])
         if response.len() > 0x38 {
             let r = &response[0x38..];
-            log::debug!!(
+            log::debug!(
                 "Auth response payload len = {}: {:x?}",
                 r.len(),
                 hex::encode(r)
@@ -225,7 +227,7 @@ trait BroadlinkDevice {
             let decrypted_payload = self.decrypt(&response[0x38..]);
             let param: u8 = decrypted_payload[0];
 
-            log::debug!!(
+            log::debug!(
                 "Auth response err/cmd/par = {}/{:02x}/{:02x} len = {}",
                 err,
                 command,
@@ -241,7 +243,7 @@ trait BroadlinkDevice {
             self.device_info_mut().id = id;
             self.device_info_mut().key = key;
         } else {
-            log::debug!!(
+            log::debug!(
                 "Auth response err/cmd = {}/{:02x} len = {}",
                 err,
                 command,
@@ -647,7 +649,38 @@ impl RM {
                     };
                     let repeat = payload[5];
                     let pulse_space_count = (payload[0x6] as u16) | (payload[0x7] as u16) << 8;
-                    println!("Signaltype {} {:02x} Repeat {} PSC {} len {}", signal_type, payload[4], repeat, pulse_space_count, payload.len()-8);
+                    let psc = std::cmp::min(pulse_space_count, (payload.len()-8) as u16);
+                    let mut micros: Vec<u16> = Vec::with_capacity(pulse_space_count.into());
+                    let ticks = &payload[8..];
+                    let mut micro_count = 0;
+              
+                    for mut i in 0 .. ticks.len()-1 {
+			      let mut ps = ticks[i] as u16;
+			      if ps == 0 && (i + 2 < ticks.len()){ // 0 then big endian 2 bytes
+				ps = ((ticks[i + 1] as u16) << 8) | (ticks[i + 2]  as u16);
+				i += 2;
+			      }
+			      let micro = ps as u32 * 8192 / 269;
+			      micro_count += 1;
+			      micros.push(micro as u16); /* 30.51757 */ // 2^-15 seconds
+			      if micro_count >= pulse_space_count {
+			      	break;
+			      }
+                    }
+                    let counts = micros
+                    	.clone()
+                    	.into_iter()
+                    	.counts();
+                    let mut sorted: Vec<_> = counts.iter().collect();
+                    sorted.sort_by_key(|a| a.0);
+			println!("Time {:?}", sorted);                	
+
+                    sorted.sort_by_key(|a| a.1);
+                    sorted.reverse();
+			println!("Count {:?}", sorted);                	
+
+                    println!("Signaltype {} {:02x} Repeat {} PSC {} len {} Frequency {:?} Micros {:?}", signal_type, payload[4], repeat, pulse_space_count, payload.len()-8, counts, micros);
+                    
                     break;
                 } else {
                     log::debug!(
