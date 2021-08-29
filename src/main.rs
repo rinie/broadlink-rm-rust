@@ -601,9 +601,11 @@ impl RM {
                         payload.len(),
                         hex::encode(&payload[0..payload.len()])
                     );
-                    println!("Sweep OK {}", payload[0]);
-                    sweep_ok = true;
-                    break;
+                    println!("Sweep OK {}", payload[0x4]);
+                    sweep_ok = payload[0x4] != 0;
+                    if sweep_ok {
+                    	break;
+                    }
                 } else {
                     println!(
                         "checkData sweep error err/cmd/par = {}/{:02x}/{:02x} len = {}",
@@ -661,9 +663,12 @@ impl RM {
                             i += 2;
                         }
                         let micro = ps as u32 * 8192 / 269;
+                        // todo 0005dc or 45680 is space timeout for RF
                         micro_count += 1;
-                        micros.push(micro as u16); /* 30.51757 */
- // 2^-15 seconds
+                        micros.push(micro as u16); /* 30.51757 // 2^-15 seconds */ 
+                        if payload[4] == 0xb2 && micro >= 45680 {
+                        	break;
+                        }
                         if micro_count >= pulse_space_count {
                             break;
                         }
