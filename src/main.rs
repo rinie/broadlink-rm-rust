@@ -273,9 +273,7 @@ trait BroadlinkDevice {
         vec
     }
 
-    fn send_packet0x6a(&mut self, packet0: RmCmd) -> (u16, u8, u8, Vec<u8>) {
-        let mut payload: [u8; 16] = [0; 16];
-        payload[0] = packet0 as u8;
+    fn send_packet0x6a_ex(&mut self, payload: &[u8]) -> (u16, u8, u8, Vec<u8>) {
         let response = self.send_packet(0x6a, &payload);
         let err = (response[0x22] as u16) | ((response[0x23] as u16) << 8);
         let command: u8 = response[0x26]; // 0xe9 auth, 0xee or 0xef payload
@@ -293,6 +291,12 @@ trait BroadlinkDevice {
         } else {
             return (err, command, 0, response);
         }
+    }
+
+    fn send_packet0x6a(&mut self, packet0: RmCmd) -> (u16, u8, u8, Vec<u8>) {
+        let mut payload: [u8; 16] = [0; 16];
+        payload[0] = packet0 as u8;
+        self.send_packet0x6a_ex(&payload)
     }
 
     fn make_packet(&mut self, command: u8, payload: &[u8]) -> Vec<u8> {
@@ -621,6 +625,25 @@ impl RM {
             self.send_packet0x6a(RmCmd::CancelSweepFrequency);
         }
         let (err, command, param, payload) = self.send_packet0x6a(RmCmd::LearnRf);
+	/*
+        let mut payload: [u8; 16] = [0; 16];
+        let freq: u32 = 433920; // 433.920 * 1000
+	payload[0] = RmCmd::LearnRf as u8;
+	payload[1] = (freq & 0xff) as u8;
+	payload[2] = ((freq >> 8) & 0xff) as u8;
+	payload[3] = ((freq >> 16) & 0xff) as u8;
+	payload[4] = ((freq >> 24) & 0xff) as u8;
+	//payload[1..5] = freq.to_le_bytes();
+        let (err, command, param, payload) = self.send_packet0x6a_ex(&payload);
+	    log::debug!(
+		"enter_learning response err/cmd/par = {}/{:02x}/{:02x} len = {}",
+		err,
+		command,
+		param,
+		payload.len()
+	    );
+	// gives err 65532/ee/00 len = 72
+	*/
         if err == 0 {
             log::debug!(
                 "enter_learning response err/cmd/par = {}/{:02x}/{:02x} len = {}",
