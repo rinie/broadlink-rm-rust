@@ -7,14 +7,30 @@ extern crate hex_literal;
 extern crate itertools;
 extern crate log;
 extern crate macaddr;
-extern crate openssl;
 extern crate time;
 use hex_literal::hex;
 use itertools::Itertools;
 use macaddr::MacAddr6;
 //use log::{debug, error, log_enabled, info, Level};
 
+#[cfg(feature = "opensslcrypto")]
+extern crate openssl;
+#[cfg(feature = "opensslcrypto")]
 use openssl::symm::{Cipher, Crypter, Mode};
+
+#[cfg(not(feature = "opensslcrypto"))]
+extern crate aes;
+#[cfg(not(feature = "opensslcrypto"))]
+extern crate block_modes;
+#[cfg(not(feature = "opensslcrypto"))]
+use aes::Aes128;
+#[cfg(not(feature = "opensslcrypto"))]
+use block_modes::{BlockMode, Cbc};
+#[cfg(not(feature = "opensslcrypto"))]
+use block_modes::block_padding::NoPadding;
+// create an alias for convenience
+#[cfg(not(feature = "opensslcrypto"))]
+type Aes128Cbc = Cbc<Aes128, NoPadding>;
 
 fn main() {
     env_logger::init();
@@ -378,6 +394,7 @@ trait BroadlinkDevice {
         packet
     }
 
+    #[cfg(feature = "opensslcrypto")]
     fn encrypt(&self, payload: &[u8]) -> Vec<u8> {
         /*
         let cipher = Cipher::aes_128_cbc();
@@ -407,6 +424,7 @@ trait BroadlinkDevice {
         ciphertext
     }
 
+    #[cfg(feature = "opensslcrypto")]
     fn decrypt(&self, ciphertext: &[u8]) -> Vec<u8> {
         //println!("Decrypting {} {:?}", ciphertext.len(), ciphertext);
         //let cipher = openssl::symm::Cipher::aes_128_cbc();
@@ -435,6 +453,36 @@ trait BroadlinkDevice {
         count += decrypter.finalize(&mut payload[count..]).unwrap();
         payload.truncate(count);
         payload
+    }
+
+    #[cfg(not(feature = "opensslcrypto"))]
+    fn encrypt(&self, payload: &[u8]) -> Vec<u8> {
+    	let cipher = Aes128Cbc::new_from_slices(&self.device_info().key, &self.device_info().iv).unwrap();
+    	/*
+        let block_size = Cipher::aes_128_cbc().block_size();
+        let mut ciphertext = vec![0; payload.len() + block_size];
+
+        let mut count = encrypter.update(payload, &mut ciphertext).unwrap();
+        count += encrypter.finalize(&mut ciphertext[count..]).unwrap();
+        ciphertext.truncate(count);
+        ciphertext
+        */
+        cipher.encrypt_vec(payload)
+    }
+
+    #[cfg(not(feature = "opensslcrypto"))]
+    fn decrypt(&self, ciphertext: &[u8]) -> Vec<u8> {
+    	let cipher = Aes128Cbc::new_from_slices(&self.device_info().key, &self.device_info().iv).unwrap();
+    	/*
+        let block_size = Cipher::aes_128_cbc().block_size();
+        let mut payload = vec![0; ciphertext.len() + block_size];
+
+        let mut count = decrypter.update(ciphertext, &mut payload).unwrap();
+        count += decrypter.finalize(&mut payload[count..]).unwrap();
+        payload.truncate(count);
+        payload
+        */
+        cipher.decrypt_vec(&ciphertext).unwrap()
     }
 
     fn checksum(&self, buffer: &[u8]) -> u16 {
