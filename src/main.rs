@@ -720,27 +720,27 @@ impl RM {
                         _ => "?",
                     };
                     let repeat = payload[5];
-                    let pulse_space_count = (payload[0x6] as u16) | (payload[0x7] as u16) << 8;
-                    let psc = std::cmp::min(pulse_space_count, (payload.len() - 8) as u16);
-                    let mut micros: Vec<u16> = Vec::with_capacity(pulse_space_count.into());
+                    let pulse_gap_count = (payload[0x6] as u16) | (payload[0x7] as u16) << 8;
+                    let _psg = std::cmp::min(pulse_gap_count, (payload.len() - 8) as u16);
+                    let mut micros: Vec<u16> = Vec::with_capacity(pulse_gap_count.into());
                     let ticks = &payload[8..];
                     let mut micro_count = 0;
 
                     for mut i in 0..ticks.len() - 1 {
-                        let mut ps = ticks[i] as u16;
-                        if ps == 0 && (i + 2 < ticks.len()) {
+                        let mut pg = ticks[i] as u16;
+                        if pg == 0 && (i + 2 < ticks.len()) {
                             // 0 then big endian 2 bytes
-                            ps = ((ticks[i + 1] as u16) << 8) | (ticks[i + 2] as u16);
+                            pg = ((ticks[i + 1] as u16) << 8) | (ticks[i + 2] as u16);
                             i += 2;
                         }
-                        let micro = ps as u32 * 8192 / 269;
+                        let micro = pg as u32 * 8192 / 269;
                         // todo 0005dc or 45680 is space timeout for RF
                         micro_count += 1;
                         micros.push(micro as u16); /* 30.51757 // 2^-15 seconds */ 
                         if payload[4] == 0xb2 && micro >= 45680 {
                         	break;
                         }
-                        if micro_count >= pulse_space_count {
+                        if micro_count >= pulse_gap_count {
                             break;
                         }
                     }
@@ -754,11 +754,11 @@ impl RM {
                     println!("Count {:?}", sorted);
 
                     println!(
-                        "Signaltype {} {:02x} Repeat {} PSC {} len {} Frequency {:?} Micros {:?}",
+                        "Signaltype {} {:02x} Repeat {} PGC {} len {} Frequency {:?} Micros {:?}",
                         signal_type,
                         payload[4],
                         repeat,
-                        pulse_space_count,
+                        pulse_gap_count,
                         payload.len() - 8,
                         counts,
                         micros
